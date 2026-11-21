@@ -2,13 +2,19 @@
 
 
 
+
+
 Addon for baking textures in Blender 5.
+
+
 
 
 
 \## Features
 
 \- (under development)
+
+
 
 
 
@@ -19,6 +25,8 @@ Addon for baking textures in Blender 5.
 2\. In Blender: Edit → Preferences → Add-ons → Install.
 
 3\. Select the ZIP file and enable the addon.
+
+
 
 
 
