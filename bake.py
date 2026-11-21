@@ -1,11 +1,9 @@
-import bpy
+"""Сам процесс запекания и сохранение результата на диск."""
 
+import bpy
 from .utils import force_select
 
 
-# ============================================================
-# ЛОГИКА ЗАПЕКАНИЯ
-# ============================================================
 def bake_texture(high_obj, low_obj, s, context):
     scene = context.scene
     scene.render.engine = 'CYCLES'
@@ -76,26 +74,25 @@ def bake_texture(high_obj, low_obj, s, context):
     if result != {'FINISHED'}:
         raise RuntimeError(f"bake вернул {result}")
 
-    _diagnose_color(img, s.bake_type)
+    diagnose_color(img, s.bake_type)
     return img
 
 
-def _diagnose_color(img, bake_type):
+def diagnose_color(img, bake_type):
+    """Быстрая проверка: чёрная или «нормально-голубая» текстура."""
     try:
         px = list(img.pixels[:4096])
         if not px:
             return
         r, g, b = px[0], px[1], px[2]
         if max(px) < 0.001:
-            print("[BAKE] ⚠️ Текстура полностью чёрная. "
-                  "Смотри отчёт предпроверки в консоли.")
+            print("[BAKE] ⚠️ Текстура полностью чёрная.")
             return
         if (bake_type == 'DIFFUSE'
                 and abs(r - 0.5) < 0.02
                 and abs(g - 0.5) < 0.02
                 and b > 0.95):
-            print("[BAKE] ⚠️ Результат похож на карту нормалей (голубой). "
-                  "Проверь bake_type = DIFFUSE.")
+            print("[BAKE] ⚠️ Результат похож на карту нормалей (голубой).")
     except Exception:
         pass
 
@@ -106,7 +103,6 @@ def save_baked_image(img, low_name, bake_type):
         folder = blend.rsplit('/', 1)[0].rsplit('\\', 1)[0]
     else:
         folder = bpy.utils.user_resource('DOCUMENTS', create=True)
-
     path = f"{folder}/{low_name}_{bake_type}_Baked.png"
     img.filepath_raw = path
     img.file_format = 'PNG'

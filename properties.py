@@ -1,11 +1,12 @@
+"""Настройки аддона. Сохраняются в .blend через Scene.bake_helper."""
+
 import bpy
-from bpy.props import StringProperty, IntProperty, EnumProperty, FloatProperty, BoolProperty
+from bpy.props import (
+    StringProperty, IntProperty, EnumProperty, FloatProperty, BoolProperty,
+)
 
 
-# ============================================================
-# ХРАНИЛИЩЕ НАСТРОЕК
-# ============================================================
-class BakeSettings(bpy.types.PropertyGroup):
+class BAKOT_PG_settings(bpy.types.PropertyGroup):
     high_name: StringProperty(name="High-poly объект")
     low_name:  StringProperty(name="Low-poly объект")
 
@@ -39,10 +40,34 @@ class BakeSettings(bpy.types.PropertyGroup):
     save_to_disk: BoolProperty(name="Сохранить PNG на диск", default=True)
     auto_fix_selection: BoolProperty(name="Автоисправление выделения", default=True)
 
-    # --- автопроверки ---
+    # --- Авто-UV ---
+    auto_unwrap: BoolProperty(
+        name="Авто-UV для low-poly",
+        description="Если у low-poly нет UV-развёртки — создать автоматически перед запеканием",
+        default=True,
+    )
+    unwrap_method: EnumProperty(
+        name="Метод UV",
+        items=[
+            ('SMART_PROJECT', "Smart UV Project",
+             "Умная проекция по углам (рекомендуется для быстрого теста)"),
+            ('LIGHTMAP_PACK', "Lightmap Pack",
+             "Каждая грань — отдельный остров (максимум швов, для запекания)"),
+            ('UNWRAP', "Unwrap (Angle Based)",
+             "Стандартная развёртка (без швов даст плоский результат)"),
+        ],
+        default='SMART_PROJECT',
+    )
+    unwrap_margin: FloatProperty(
+        name="Отступ островов",
+        description="Расстояние между UV-островами после упаковки (0.001–0.1)",
+        default=0.02, min=0.0, max=0.5,
+    )
+
+    # --- Автопроверки ---
     auto_zero_metallic: BoolProperty(
         name="Автоматически обнулить Metallic",
-        description="Временно ставит Metallic=0 у материалов high-poly (причина №1 чёрной текстуры)",
+        description="Временно ставит Metallic=0 у материалов high-poly",
         default=True,
     )
     auto_boost_cage: BoolProperty(
@@ -57,6 +82,5 @@ class BakeSettings(bpy.types.PropertyGroup):
     )
     run_preflight: BoolProperty(
         name="Показать отчёт предпроверки перед запуском",
-        description="Если включено — после проверки откроется окно с найденными проблемами",
         default=True,
     )
