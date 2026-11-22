@@ -55,6 +55,7 @@ class BAKOT_PT_panel(bpy.types.Panel):
 
         box.prop(s, "samples")
         box.prop(s, "connect_after_bake")
+        box.prop(s, "align_nodes_after_bake")
 
         # --- Автопроверки ---
         box = layout.box()

@@ -20,9 +20,14 @@ def unhide_object_recursive(obj):
     obj.hide_viewport = False
     obj.hide_set(False)
     obj.hide_select = False
+
+    # Включаем видимость для рендера (решает ошибку "is not enabled for rendering")
+    obj.hide_render = False
+
     for coll in obj.users_collection:
         coll.hide_viewport = False
         coll.hide_select = False
+        coll.hide_render = False
 
     def walk_layer(layer_coll):
         for child in layer_coll.children:

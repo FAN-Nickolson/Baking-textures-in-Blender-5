@@ -10,16 +10,16 @@ bl_info = {
     "category": "Object",
 }
 
-import bpy
+import bpy  # noqa: E402
 
-from .properties import BAKOT_PG_settings
-from .operators import (
+from .properties import BAKOT_PG_settings  # noqa: E402
+from .operators import (  # noqa: E402
     BAKOT_OT_preflight_report,
     BAKOT_OT_bake_high_to_low,
     BAKOT_OT_unwrap_low_only,
     BAKOT_OT_fill_from_selection,
 )
-from .panels import BAKOT_PT_panel, menu_object_bake_helper
+from .panels import BAKOT_PT_panel, menu_object_bake_helper  # noqa: E402
 
 
 classes = (
@@ -48,3 +48,7 @@ def unregister():
             bpy.utils.unregister_class(c)
         except Exception:
             pass
+
+
+if __name__ == "__main__":
+    register()

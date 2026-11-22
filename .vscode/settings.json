@@ -1,8 +1,4 @@
 {
-    "python.linting.flake8Enabled": true,
-    "python.linting.flake8Args": ["--config=.flake8"],
-    "python.analysis.diagnosticSeverityOverrides": {
-        "reportInvalidTypeForm": "none",
-        "reportMissingImports": "none"
-    }
+  "python.linting.flake8Enabled": true,
+  "python.linting.flake8Args": ["--config=.flake8"]
 }

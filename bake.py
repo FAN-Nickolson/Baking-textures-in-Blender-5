@@ -1,4 +1,4 @@
-"""Сам процесс запекания и сохранение результата на диск."""
+"""Сам процесс запекания, автоподключение нод и сохранение на диск."""
 
 import bpy
 from .utils import force_select
@@ -15,7 +15,9 @@ def bake_texture(high_obj, low_obj, s, context):
     if img_name in bpy.data.images:
         bpy.data.images.remove(bpy.data.images[img_name])
     img = bpy.data.images.new(img_name, width=s.resolution, height=s.resolution)
-    if s.bake_type in {'NORMAL', 'AO', 'ROUGHNESS', 'METALLIC', 'DISPLACEMENT'}:
+
+    # EMIT теперь используется для карт высот, поэтому тоже Non-Color
+    if s.bake_type in {'NORMAL', 'AO', 'ROUGHNESS', 'METALLIC', 'EMIT'}:
         img.colorspace_settings.name = 'Non-Color'  # type: ignore[assignment]
     else:
         img.colorspace_settings.name = 'sRGB'  # type: ignore[assignment]
@@ -76,6 +78,11 @@ def bake_texture(high_obj, low_obj, s, context):
             print(f"[BAKE] {s.bake_type}: текстура подключена к материалу")
         else:
             print(f"[BAKE] ⚠️ Не удалось подключить {s.bake_type} к материалу")
+
+    # --- Автовыравнивание нод ---
+    if getattr(s, "align_nodes_after_bake", False):
+        align_material_nodes(mat)
+        print("[BAKE] Ноды материала выровнены в цепочку")
 
     return img
 
@@ -285,6 +292,57 @@ def _connect_ao(links, nodes, tex_node, principled):
     return True
 
 
+# ============================================================
+# АВТОВЫРАВНИВАНИЕ НОД
+# ============================================================
+def align_material_nodes(mat):
+    """Выстраивает ноды в цепочку слева направо: Image -> ... -> Principled -> Output."""
+    if not mat or not mat.use_nodes or not mat.node_tree:
+        return
+
+    nodes = mat.node_tree.nodes
+    cache = {}
+
+    def get_depth(n, visiting):
+        if n in cache:
+            return cache[n]
+        if n in visiting:
+            return 0  # Защита от циклов
+        visiting.add(n)
+
+        max_in_depth = -1
+        for inp in n.inputs:
+            for link in inp.links:
+                d = get_depth(link.from_node, visiting)
+                max_in_depth = max(max_in_depth, d)
+
+        visiting.remove(n)
+        # Глубина = максимальная глубина входящих + 1
+        depth = (max_in_depth + 1) if max_in_depth >= 0 else 0
+        cache[n] = depth
+        return depth
+
+    for n in nodes:
+        get_depth(n, set())
+
+    # Группируем по глубине (это будут столбцы)
+    columns = {}
+    for n in nodes:
+        if n.type == 'FRAME':
+            continue
+        d = cache.get(n, 0)
+        columns.setdefault(d, []).append(n)
+
+    # Расставляем: X зависит от глубины (300px), Y — порядковый номер в столбце (200px)
+    for d, col_nodes in columns.items():
+        col_nodes.sort(key=lambda n: (n.name, n.type))
+        for i, n in enumerate(col_nodes):
+            n.location = (d * 300, -i * 200)
+
+
+# ============================================================
+# ДИАГНОСТИКА И СОХРАНЕНИЕ
+# ============================================================
 def diagnose_color(img, bake_type):
     """Быстрая проверка: чёрная или «нормально-голубая» текстура."""
     try:

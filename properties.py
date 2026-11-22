@@ -18,8 +18,8 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
             ('AO',          "AO",          "Ambient Occlusion"),
             ('ROUGHNESS',   "Roughness",   "Шероховатость"),
             ('METALLIC',    "Metallic",    "Металличность"),
-            ('EMIT',        "Emission",    "Emission"),
-            ('DISPLACEMENT', "Displacement", "Карта высот"),
+            # Вместо DISPLACEMENT используем EMIT (Blender не умеет запекать DISPLACEMENT напрямую)
+            ('EMIT',        "Height / Displacement (Emit)", "Карта высот через Emission"),
         ],
         default='DIFFUSE',
     )
@@ -84,9 +84,16 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
         name="Показать отчёт предпроверки перед запуском",
         default=True,
     )
+
+    # --- Пост-обработка ---
     connect_after_bake: BoolProperty(
-    name="Подключить текстуру к материалу",
-    description="Автоматически подключать Image Texture к нужному входу "
-                "Principled BSDF в зависимости от типа карты",
-    default=True,
-)
+        name="Подключить текстуру к материалу",
+        description="Автоматически подключать Image Texture к нужному входу "
+                    "Principled BSDF в зависимости от типа карты",
+        default=True,
+    )
+    align_nodes_after_bake: BoolProperty(
+        name="Выравнивать ноды после запекания",
+        description="Располагать ноды материала в линейную цепочку (слева направо) для удобства чтения",
+        default=True,
+    )

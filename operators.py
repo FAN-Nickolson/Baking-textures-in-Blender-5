@@ -13,8 +13,8 @@ class BAKOT_OT_preflight_report(bpy.types.Operator):
     bl_label = "Отчёт предпроверки"
     bl_description = "Показывает найденные проблемы и автоматические исправления"
 
-    warnings: StringProperty(default="")
-    fixes: StringProperty(default="")
+    warnings: StringProperty(default="")  # noqa: F722
+    fixes: StringProperty(default="")     # noqa: F722
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=560)
@@ -62,7 +62,7 @@ class BAKOT_OT_bake_high_to_low(bpy.types.Operator):
 
         try:
             high = find_object(s.high_name, "High-poly")
-            low  = find_object(s.low_name,  "Low-poly")
+            low = find_object(s.low_name, "Low-poly")
         except ValueError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
@@ -88,7 +88,7 @@ class BAKOT_OT_bake_high_to_low(bpy.types.Operator):
             return {'CANCELLED'}
 
         if s.run_preflight and (warnings or fixes):
-            print("\n===== ОТЧЁТ ПРЕДПРОВЕРКИ =====")
+            print("\n===== ОТЧЁТ ПРОВЕРКИ =====")
             for f in fixes:
                 print(f"[PREFLIGHT] {f}")
             for w in warnings:
@@ -149,7 +149,7 @@ class BAKOT_OT_unwrap_low_only(bpy.types.Operator):
             return {'CANCELLED'}
 
         try:
-            created, msg = ensure_uv_unwrap(
+            _created, msg = ensure_uv_unwrap(
                 obj, s.unwrap_method, s.unwrap_margin, context
             )
             self.report({'INFO'}, msg)

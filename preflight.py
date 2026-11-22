@@ -1,6 +1,5 @@
 """Предполётные проверки: UV, Metallic, Base Color, bounding box, нормали, margin."""
 
-import bpy
 from .utils import ensure_uv_unwrap
 
 
@@ -168,7 +167,10 @@ def preflight_check(high_obj, low_obj, s, context):
                     continue
                 bm = bmesh.new()
                 bm.from_mesh(obj.data)
-                bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+                # Исправлено для Pylance: оборачиваем bm.faces в list()
+                bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+
                 bm.to_mesh(obj.data)
                 bm.free()
                 obj.data.update()
