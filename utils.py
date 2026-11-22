@@ -3,6 +3,11 @@
 import bpy
 
 
+def t(lang, ru_text, en_text):
+    """Возвращает строку на нужном языке."""
+    return en_text if lang == 'EN' else ru_text
+
+
 def find_object(name, expected_role):
     """Ищет объект по имени, при неудаче — без учёта регистра и пробелов."""
     obj = bpy.data.objects.get(name)

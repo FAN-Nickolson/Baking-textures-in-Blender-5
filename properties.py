@@ -7,6 +7,15 @@ from bpy.props import (
 
 
 class BAKOT_PG_settings(bpy.types.PropertyGroup):
+    language: EnumProperty(
+        name="Language / Язык",
+        items=[
+            ('RU', "Русский", "Русский язык"),
+            ('EN', "English", "English language"),
+        ],
+        default='RU',
+    )
+
     high_name: StringProperty(name="High-poly объект")
     low_name:  StringProperty(name="Low-poly объект")
 
@@ -18,7 +27,6 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
             ('AO',          "AO",          "Ambient Occlusion"),
             ('ROUGHNESS',   "Roughness",   "Шероховатость"),
             ('METALLIC',    "Metallic",    "Металличность"),
-            # Вместо DISPLACEMENT используем EMIT (Blender не умеет запекать DISPLACEMENT напрямую)
             ('EMIT',        "Height / Displacement (Emit)", "Карта высот через Emission"),
         ],
         default='DIFFUSE',
@@ -94,6 +102,7 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
     )
     align_nodes_after_bake: BoolProperty(
         name="Выравнивать ноды после запекания",
-        description="Располагать ноды материала в линейную цепочку (слева направо) для удобства чтения",
+        description="Располагать ноды материала в линейную цепочку "
+                    "(слева направо) для удобства чтения",
         default=True,
     )
