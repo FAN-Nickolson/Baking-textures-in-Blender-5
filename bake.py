@@ -16,16 +16,18 @@ def bake_texture(high_obj, low_obj, s, context):
         bpy.data.images.remove(bpy.data.images[img_name])
     img = bpy.data.images.new(img_name, width=s.resolution, height=s.resolution)
     if s.bake_type in {'NORMAL', 'AO', 'ROUGHNESS', 'METALLIC', 'DISPLACEMENT'}:
-        img.colorspace_settings.name = 'Non-Color'
+        img.colorspace_settings.name = 'Non-Color'  # type: ignore[assignment]
     else:
-        img.colorspace_settings.name = 'sRGB'
+        img.colorspace_settings.name = 'sRGB'  # type: ignore[assignment]
 
     # --- Материал-приёмник ---
     mat = bpy.data.materials.new(name=f"{low_obj.name}_BakeMat")
     mat.use_nodes = True
+    if mat.node_tree is None:
+        raise RuntimeError(f"Не удалось создать node tree для '{mat.name}'")
     nodes = mat.node_tree.nodes
     tex_node = nodes.new('ShaderNodeTexImage')
-    tex_node.image = img
+    tex_node.image = img  # type: ignore[attr-defined]
     nodes.active = tex_node
     tex_node.select = True
 
@@ -53,13 +55,13 @@ def bake_texture(high_obj, low_obj, s, context):
     bake_settings.use_cage = False
 
     if s.bake_type == 'DIFFUSE':
-        bake_settings.use_pass_direct   = False
+        bake_settings.use_pass_direct = False
         bake_settings.use_pass_indirect = False
-        bake_settings.use_pass_color    = True
+        bake_settings.use_pass_color = True
     elif s.bake_type == 'EMIT':
-        bake_settings.use_pass_direct   = False
+        bake_settings.use_pass_direct = False
         bake_settings.use_pass_indirect = False
-        bake_settings.use_pass_color    = False
+        bake_settings.use_pass_color = False
 
     print(f"[BAKE] {s.bake_type}: {high_obj.name} → {low_obj.name} @ {s.resolution}px")
     print(f"[BAKE] cage_extrusion={s.cage_extrusion}, "
@@ -75,7 +77,60 @@ def bake_texture(high_obj, low_obj, s, context):
         raise RuntimeError(f"bake вернул {result}")
 
     diagnose_color(img, s.bake_type)
+
+    # --- Подключение Image Texture к Base Color (только для Diffuse) ---
+    if s.bake_type == 'DIFFUSE' and s.connect_diffuse_after_bake:
+        if connect_diffuse_to_principled(mat, tex_node):
+            print("[BAKE] Image Texture.Color → Principled BSDF.Base Color подключено")
+        else:
+            print("[BAKE] ⚠️ Не удалось подключить Image Texture к Base Color")
+
     return img
+
+
+def connect_diffuse_to_principled(mat, tex_node):
+    """Image Texture (Color) → Principled BSDF (Base Color)."""
+    if not mat or not mat.use_nodes or mat.node_tree is None:
+        return False
+
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+
+    principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
+    output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL'), None)
+
+    tx = tex_node.location[0]
+    ty = tex_node.location[1]
+
+    if principled is None:
+        principled = nodes.new('ShaderNodeBsdfPrincipled')
+        principled.location = (tx + 300, ty)
+
+    if output is None:
+        output = nodes.new('ShaderNodeOutputMaterial')
+        output.location = (principled.location[0] + 300, principled.location[1])
+
+    already_linked = any(
+        link.from_node == principled and link.to_node == output
+        and link.to_socket.name == 'Surface'
+        for link in links
+    )
+    if not already_linked:
+        for link in list(links):
+            if link.to_node == output and link.to_socket.name == 'Surface':
+                links.remove(link)
+        links.new(principled.outputs['BSDF'], output.inputs['Surface'])
+
+    base_color = principled.inputs.get('Base Color')
+    if base_color is None:
+        return False
+
+    for link in list(links):
+        if link.to_socket == base_color:
+            links.remove(link)
+
+    links.new(tex_node.outputs['Color'], base_color)
+    return True
 
 
 def diagnose_color(img, bake_type):

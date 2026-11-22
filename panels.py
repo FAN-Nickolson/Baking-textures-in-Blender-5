@@ -46,6 +46,9 @@ class BAKOT_PT_panel(bpy.types.Panel):
         col.prop(s, "margin")
         col.prop(s, "margin_type")
         box.prop(s, "samples")
+        col = box.column(align=True)
+        col.enabled = (s.bake_type == 'DIFFUSE')
+        col.prop(s, "connect_diffuse_after_bake")
 
         # --- Автопроверки ---
         box = layout.box()

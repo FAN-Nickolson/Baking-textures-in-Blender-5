@@ -19,7 +19,7 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
             ('ROUGHNESS',   "Roughness",   "Шероховатость"),
             ('METALLIC',    "Metallic",    "Металличность"),
             ('EMIT',        "Emission",    "Emission"),
-            ('DISPLACEMENT',"Displacement","Карта высот"),
+            ('DISPLACEMENT', "Displacement", "Карта высот"),
         ],
         default='DIFFUSE',
     )
@@ -82,5 +82,11 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
     )
     run_preflight: BoolProperty(
         name="Показать отчёт предпроверки перед запуском",
+        default=True,
+    )
+    connect_diffuse_after_bake: BoolProperty(
+        name="Подключить Diffuse к Base Color",
+        description="После запекания Base Color подключить Image Texture "
+                    "к Principled BSDF → Base Color",
         default=True,
     )
