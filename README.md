@@ -2,9 +2,9 @@
 
 
 
-Аддон Blender 5 для запекания текстур с high-poly объекта на low-poly
+Blender 5 addon for baking textures from a high-poly object to a low-poly
 
-с предполётными проверками и автоматическим созданием UV.
+with pre-flight checks and automatic UV generation.
 
 
 
