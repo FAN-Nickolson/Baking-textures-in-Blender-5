@@ -84,9 +84,9 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
         name="Показать отчёт предпроверки перед запуском",
         default=True,
     )
-    connect_diffuse_after_bake: BoolProperty(
-        name="Подключить Diffuse к Base Color",
-        description="После запекания Base Color подключить Image Texture "
-                    "к Principled BSDF → Base Color",
-        default=True,
-    )
+    connect_after_bake: BoolProperty(
+    name="Подключить текстуру к материалу",
+    description="Автоматически подключать Image Texture к нужному входу "
+                "Principled BSDF в зависимости от типа карты",
+    default=True,
+)

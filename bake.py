@@ -20,21 +20,13 @@ def bake_texture(high_obj, low_obj, s, context):
     else:
         img.colorspace_settings.name = 'sRGB'  # type: ignore[assignment]
 
-    # --- Материал-приёмник ---
-    mat = bpy.data.materials.new(name=f"{low_obj.name}_BakeMat")
-    mat.use_nodes = True
-    if mat.node_tree is None:
-        raise RuntimeError(f"Не удалось создать node tree для '{mat.name}'")
+    # --- Материал-приёмник (переиспользуем существующий) ---
+    mat = _get_or_create_bake_material(low_obj)
     nodes = mat.node_tree.nodes
     tex_node = nodes.new('ShaderNodeTexImage')
     tex_node.image = img  # type: ignore[attr-defined]
     nodes.active = tex_node
     tex_node.select = True
-
-    if low_obj.data.materials:
-        low_obj.data.materials[0] = mat
-    else:
-        low_obj.data.materials.append(mat)
 
     # --- Выделение ---
     if s.auto_fix_selection:
@@ -78,18 +70,38 @@ def bake_texture(high_obj, low_obj, s, context):
 
     diagnose_color(img, s.bake_type)
 
-    # --- Подключение Image Texture к Base Color (только для Diffuse) ---
-    if s.bake_type == 'DIFFUSE' and s.connect_diffuse_after_bake:
-        if connect_diffuse_to_principled(mat, tex_node):
-            print("[BAKE] Image Texture.Color → Principled BSDF.Base Color подключено")
+    # --- Автоподключение к Principled BSDF ---
+    if s.connect_after_bake:
+        if connect_texture_to_principled(mat, tex_node, s.bake_type):
+            print(f"[BAKE] {s.bake_type}: текстура подключена к материалу")
         else:
-            print("[BAKE] ⚠️ Не удалось подключить Image Texture к Base Color")
+            print(f"[BAKE] ⚠️ Не удалось подключить {s.bake_type} к материалу")
 
     return img
 
 
-def connect_diffuse_to_principled(mat, tex_node):
-    """Image Texture (Color) → Principled BSDF (Base Color)."""
+def _get_or_create_bake_material(low_obj):
+    """Переиспользует материал {low_name}_BakeMat, если он уже создан."""
+    mat_name = f"{low_obj.name}_BakeMat"
+    mat = bpy.data.materials.get(mat_name)
+    if mat is None or not mat.use_nodes:
+        mat = bpy.data.materials.new(name=mat_name)
+        mat.use_nodes = True
+    if mat.node_tree is None:
+        raise RuntimeError(f"Не удалось создать node tree для '{mat.name}'")
+
+    if low_obj.data.materials:
+        low_obj.data.materials[0] = mat
+    else:
+        low_obj.data.materials.append(mat)
+    return mat
+
+
+# ============================================================
+# АВТОПОДКЛЮЧЕНИЕ: диспетчер + функции по типам
+# ============================================================
+def connect_texture_to_principled(mat, tex_node, bake_type):
+    """Подключает Image Texture к нужному входу Principled BSDF."""
     if not mat or not mat.use_nodes or mat.node_tree is None:
         return False
 
@@ -110,26 +122,166 @@ def connect_diffuse_to_principled(mat, tex_node):
         output = nodes.new('ShaderNodeOutputMaterial')
         output.location = (principled.location[0] + 300, principled.location[1])
 
-    already_linked = any(
+    # Principled → Output
+    surface_linked = any(
         link.from_node == principled and link.to_node == output
         and link.to_socket.name == 'Surface'
         for link in links
     )
-    if not already_linked:
+    if not surface_linked:
         for link in list(links):
             if link.to_node == output and link.to_socket.name == 'Surface':
                 links.remove(link)
         links.new(principled.outputs['BSDF'], output.inputs['Surface'])
 
+    if bake_type == 'DIFFUSE':
+        return _connect_base_color(links, tex_node, principled)
+    elif bake_type == 'NORMAL':
+        return _connect_normal(links, nodes, tex_node, principled)
+    elif bake_type == 'ROUGHNESS':
+        return _connect_simple(links, tex_node, principled, 'Roughness')
+    elif bake_type == 'METALLIC':
+        return _connect_simple(links, tex_node, principled, 'Metallic')
+    elif bake_type == 'EMIT':
+        return _connect_emission(links, tex_node, principled)
+    elif bake_type == 'AO':
+        return _connect_ao(links, nodes, tex_node, principled)
+    return False
+
+
+def _connect_simple(links, tex_node, principled, socket_name):
+    """Image.Color → Principled.<socket_name>"""
+    target = principled.inputs.get(socket_name)
+    if target is None:
+        return False
+    for link in list(links):
+        if link.to_socket == target:
+            links.remove(link)
+    links.new(tex_node.outputs['Color'], target)
+    return True
+
+
+def _connect_base_color(links, tex_node, principled):
+    """Image.Color → Base Color (учитывает существующий AO Mix)."""
     base_color = principled.inputs.get('Base Color')
     if base_color is None:
         return False
 
     for link in list(links):
         if link.to_socket == base_color:
-            links.remove(link)
+            src_node = link.from_node
+            # Если Base Color питается от AO-Mix — обновляем его Color1
+            if src_node.type == 'MIX_RGB' and src_node.blend_type == 'MULTIPLY':
+                for l2 in list(links):
+                    if l2.to_node == src_node and l2.to_socket.name == 'Color1':
+                        links.remove(l2)
+                links.new(tex_node.outputs['Color'], src_node.inputs['Color1'])
+                return True
+            else:
+                links.remove(link)
 
     links.new(tex_node.outputs['Color'], base_color)
+    return True
+
+
+def _connect_normal(links, nodes, tex_node, principled):
+    """Image.Color → Normal Map.Color → Principled.Normal"""
+    normal_input = principled.inputs.get('Normal')
+    if normal_input is None:
+        return False
+
+    normal_map = None
+    for link in list(links):
+        if link.to_socket == normal_input:
+            if link.from_node.type == 'NORMAL_MAP':
+                normal_map = link.from_node
+            else:
+                links.remove(link)
+            break
+
+    if normal_map is None:
+        normal_map = nodes.new('ShaderNodeNormalMap')
+        normal_map.location = (
+            principled.location[0] - 250,
+            principled.location[1] - 150,
+        )
+        links.new(normal_map.outputs['Normal'], normal_input)
+
+    for link in list(links):
+        if link.to_node == normal_map and link.to_socket.name == 'Color':
+            links.remove(link)
+    links.new(tex_node.outputs['Color'], normal_map.inputs['Color'])
+    return True
+
+
+def _connect_emission(links, tex_node, principled):
+    """Image.Color → Emission Color, Emission Strength = 1.0"""
+    emission_input = principled.inputs.get('Emission Color')
+    if emission_input is None:
+        emission_input = principled.inputs.get('Emission')
+    if emission_input is None:
+        return False
+
+    for link in list(links):
+        if link.to_socket == emission_input:
+            links.remove(link)
+    links.new(tex_node.outputs['Color'], emission_input)
+
+    strength = principled.inputs.get('Emission Strength')
+    if strength is not None and not strength.is_linked:
+        strength.default_value = 1.0
+
+    return True
+
+
+def _connect_ao(links, nodes, tex_node, principled):
+    """Image.Color → Mix(Multiply).Color2 → Base Color."""
+    base_color = principled.inputs.get('Base Color')
+    if base_color is None:
+        return False
+
+    # Уже есть AO Mix — обновляем Color2
+    existing_mix = None
+    for link in list(links):
+        if link.to_socket == base_color:
+            if (link.from_node.type == 'MIX_RGB'
+                    and link.from_node.blend_type == 'MULTIPLY'):
+                existing_mix = link.from_node
+            break
+
+    if existing_mix is not None:
+        for link in list(links):
+            if link.to_node == existing_mix and link.to_socket.name == 'Color2':
+                links.remove(link)
+        links.new(tex_node.outputs['Color'], existing_mix.inputs['Color2'])
+        return True
+
+    # Создаём новый Mix
+    default_color = tuple(base_color.default_value)
+    existing_source = None
+    for link in list(links):
+        if link.to_socket == base_color:
+            existing_source = link.from_socket
+            links.remove(link)
+            break
+
+    mix = nodes.new('ShaderNodeMixRGB')
+    mix.blend_type = 'MULTIPLY'
+    mix.inputs['Fac'].default_value = 1.0
+    mix.location = (
+        principled.location[0] - 300,
+        principled.location[1] + 100,
+    )
+
+    if existing_source is not None:
+        links.new(existing_source, mix.inputs['Color1'])
+    else:
+        mix.inputs['Color1'].default_value = (
+            default_color[0], default_color[1], default_color[2], 1.0,
+        )
+
+    links.new(tex_node.outputs['Color'], mix.inputs['Color2'])
+    links.new(mix.outputs['Color'], base_color)
     return True
 
 

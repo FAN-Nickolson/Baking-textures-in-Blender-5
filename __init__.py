@@ -1,1 +1,50 @@
-"""Bake Helper: запекание текстур с high-poly на low-poly."""bl_info = {    "name": "Bake Helper: High → Low",    "author": "Custom",    "version": (1, 1, 0),    "blender": (5, 0, 0),    "location": "View3D > Sidebar > Bake | Object menu",    "description": "Запекание текстур с high-poly на low-poly + авто-UV",    "category": "Object",}import bpyfrom .properties import BAKOT_PG_settingsfrom .operators import (    BAKOT_OT_preflight_report,    BAKOT_OT_bake_high_to_low,    BAKOT_OT_unwrap_low_only,    BAKOT_OT_fill_from_selection,)from .panels import BAKOT_PT_panel, menu_object_bake_helperclasses = (    BAKOT_PG_settings,    BAKOT_OT_preflight_report,    BAKOT_OT_bake_high_to_low,    BAKOT_OT_unwrap_low_only,    BAKOT_OT_fill_from_selection,    BAKOT_PT_panel,)def register():    for c in classes:        bpy.utils.register_class(c)    bpy.types.Scene.bake_helper = bpy.props.PointerProperty(type=BAKOT_PG_settings)    bpy.types.VIEW3D_MT_object.append(menu_object_bake_helper)def unregister():    bpy.types.VIEW3D_MT_object.remove(menu_object_bake_helper)    if hasattr(bpy.types.Scene, "bake_helper"):        del bpy.types.Scene.bake_helper    for c in reversed(classes):        try:            bpy.utils.unregister_class(c)        except Exception:            pass
+"""Bake Helper: запекание текстур с high-poly на low-poly."""
+
+bl_info = {
+    "name": "Bake Helper: High → Low",
+    "author": "Custom",
+    "version": (1, 2, 0),
+    "blender": (5, 0, 0),
+    "location": "View3D > Sidebar > Bake | Object menu",
+    "description": "Запекание текстур с high-poly на low-poly + авто-UV",
+    "category": "Object",
+}
+
+import bpy
+
+from .properties import BAKOT_PG_settings
+from .operators import (
+    BAKOT_OT_preflight_report,
+    BAKOT_OT_bake_high_to_low,
+    BAKOT_OT_unwrap_low_only,
+    BAKOT_OT_fill_from_selection,
+)
+from .panels import BAKOT_PT_panel, menu_object_bake_helper
+
+
+classes = (
+    BAKOT_PG_settings,
+    BAKOT_OT_preflight_report,
+    BAKOT_OT_bake_high_to_low,
+    BAKOT_OT_unwrap_low_only,
+    BAKOT_OT_fill_from_selection,
+    BAKOT_PT_panel,
+)
+
+
+def register():
+    for c in classes:
+        bpy.utils.register_class(c)
+    bpy.types.Scene.bake_helper = bpy.props.PointerProperty(type=BAKOT_PG_settings)
+    bpy.types.VIEW3D_MT_object.append(menu_object_bake_helper)
+
+
+def unregister():
+    bpy.types.VIEW3D_MT_object.remove(menu_object_bake_helper)
+    if hasattr(bpy.types.Scene, "bake_helper"):
+        del bpy.types.Scene.bake_helper
+    for c in reversed(classes):
+        try:
+            bpy.utils.unregister_class(c)
+        except Exception:
+            pass
