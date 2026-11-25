@@ -3,7 +3,7 @@
 bl_info = {
     "name": "Bake Helper: High → Low",
     "author": "Custom",
-    "version": (1, 3, 0),
+    "version": (1, 5, 0),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > Bake | Object menu",
     "description": "Запекание текстур с high-poly на low-poly + авто-UV",
@@ -38,21 +38,25 @@ def load_bake_helper_lang(dummy):
     """Обновляет подсказки при загрузке .blend файла."""
     for scene in bpy.data.scenes:
         if hasattr(scene, "bake_helper"):
-            update_lang(scene.bake_helper, bpy.context)
+            # Передаем None в качестве контекста, чтобы избежать ошибок
+            update_lang(scene.bake_helper, None)
 
 
 def register():
+    # Защита от ошибки "already registered" при обновлении/перезагрузке
     for c in classes:
+        try:
+            bpy.utils.unregister_class(c)
+        except RuntimeError:
+            pass
         bpy.utils.register_class(c)
+
     bpy.types.Scene.bake_helper = bpy.props.PointerProperty(type=BAKOT_PG_settings)
     bpy.types.VIEW3D_MT_object.append(menu_object_bake_helper)
 
-    # Добавляем обработчик для обновления подсказок при загрузке
     bpy.app.handlers.load_post.append(load_bake_helper_lang)
 
-    # Первичная инициализация подсказок (при старте Blender)
-    if bpy.context.scene and hasattr(bpy.context.scene, "bake_helper"):
-        update_lang(bpy.context.scene.bake_helper, bpy.context)
+    # Убрано обращение к bpy.context.scene, чтобы не вызывать _RestrictContext
 
 
 def unregister():
@@ -62,6 +66,7 @@ def unregister():
     bpy.types.VIEW3D_MT_object.remove(menu_object_bake_helper)
     if hasattr(bpy.types.Scene, "bake_helper"):
         del bpy.types.Scene.bake_helper
+
     for c in reversed(classes):
         try:
             bpy.utils.unregister_class(c)

@@ -1,32 +1,34 @@
 """Вспомогательные функции: поиск объектов, принудительное выделение, авто-UV."""
 
 import bpy
+import re
 
 
 def t(lang, ru_text, en_text):
-    """Возвращает строку на нужном языке."""
     return en_text if lang == 'EN' else ru_text
 
 
 def find_object(name, expected_role):
-    """Ищет объект по имени, при неудаче — без учёта регистра и пробелов."""
+    """Ищет объект по имени. Обрабатывает суффиксы .001 и регистр."""
     obj = bpy.data.objects.get(name)
-    if obj is None:
-        for o in bpy.data.objects:
-            if o.name.lower() == name.lower().strip():
-                print(f"[BAKE] Точное имя не найдено, использую '{o.name}' вместо '{name}'")
-                return o
-        raise ValueError(f"{expected_role} объект '{name}' не найден в файле")
-    return obj
+    if obj:
+        return obj
+
+    # №1: Если не нашли, убираем возможный суффикс .001
+    clean_name = re.sub(r'\.\d{3}$', '', name)
+    for o in bpy.data.objects:
+        if o.name.lower() == clean_name.lower().strip():
+            print(f"[BAKE] Объект найден по базовому имени: '{o.name}'")
+            return o
+
+    raise ValueError(f"{expected_role} объект '{name}' не найден в файле")
 
 
 def unhide_object_recursive(obj):
-    """Снимает скрытость с объекта и всех его родительских коллекций."""
+    """Снимает скрытость с объекта и коллекций."""
     obj.hide_viewport = False
     obj.hide_set(False)
     obj.hide_select = False
-
-    # Включаем видимость для рендера (решает ошибку "is not enabled for rendering")
     obj.hide_render = False
 
     for coll in obj.users_collection:
@@ -45,7 +47,6 @@ def unhide_object_recursive(obj):
 
 
 def force_select(high_obj, low_obj, context):
-    """Гарантированно выделяет high + low (low активный)."""
     vl = context.view_layer
     for o in (high_obj, low_obj):
         unhide_object_recursive(o)
@@ -64,24 +65,10 @@ def force_select(high_obj, low_obj, context):
     low_obj.select_set(True)
     vl.objects.active = low_obj
 
-    selected = [o.name for o in context.selected_objects]
-    active = vl.objects.active.name if vl.objects.active else None
-    print(f"[BAKE] Выделено: {selected}  |  Активный: {active}")
-
-    if high_obj.name not in selected:
-        raise RuntimeError(f"Не удалось выделить high-poly '{high_obj.name}'")
-    if low_obj.name not in selected:
-        raise RuntimeError(f"Не удалось выделить low-poly '{low_obj.name}'")
-    if active != low_obj.name:
-        raise RuntimeError(f"Активным стал не low-poly, а '{active}'")
-    return high_obj, low_obj
-
 
 def ensure_uv_unwrap(obj, method='SMART_PROJECT', island_margin=0.02, context=None):
-    """Создаёт UV-развёртку, если её нет. Возвращает (created: bool, message: str)."""
     if context is None:
         context = bpy.context
-
     if obj.data.uv_layers and len(obj.data.uv_layers) > 0:
         return (False, "UV уже существует")
 
@@ -92,38 +79,22 @@ def ensure_uv_unwrap(obj, method='SMART_PROJECT', island_margin=0.02, context=No
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         context.view_layer.objects.active = obj
-
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
 
         if method == 'SMART_PROJECT':
-            bpy.ops.uv.smart_project(
-                angle_limit=1.15192,
-                island_margin=island_margin,
-                area_weight=0.0,
-                correct_aspect=True,
-                scale_to_bounds=False,
-            )
+            bpy.ops.uv.smart_project(angle_limit=1.15192, island_margin=island_margin, area_weight=0.0, correct_aspect=True, scale_to_bounds=False)
         elif method == 'LIGHTMAP_PACK':
-            bpy.ops.uv.lightmap_pack(
-                PREF_CONTEXT='ALL_FACES',
-                PREF_MARGIN_DIV=island_margin,
-            )
+            bpy.ops.uv.lightmap_pack(PREF_CONTEXT='ALL_FACES', PREF_MARGIN_DIV=island_margin)
         elif method == 'UNWRAP':
             bpy.ops.uv.unwrap(method='ANGLE_BASED', margin=island_margin)
-        else:
-            raise ValueError(f"Неизвестный метод: {method}")
 
         bpy.ops.uv.pack_islands(margin=island_margin)
         return (True, f"UV создан методом {method}")
-
     finally:
         try:
             if obj.mode != 'OBJECT':
                 bpy.ops.object.mode_set(mode='OBJECT')
-        except Exception:
-            pass
-        try:
             bpy.ops.object.select_all(action='DESELECT')
             for o in prev_selected:
                 if o.name in context.view_layer.objects:

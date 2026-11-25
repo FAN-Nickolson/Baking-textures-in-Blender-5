@@ -4,32 +4,44 @@ import bpy
 from .utils import force_select
 
 
-def bake_texture(high_obj, low_obj, s, context):
-    scene = context.scene
+def _setup_render_engine(scene, s):
     scene.render.engine = 'CYCLES'
-    scene.cycles.device = 'CPU'
     scene.cycles.samples = s.samples
 
-    # --- Изображение ---
+    if s.use_gpu:
+        try:
+            prefs = bpy.context.preferences.addons['cycles'].preferences
+            prefs.compute_device_type = 'OPTIX'
+            prefs.get_devices()
+            has_gpu = any(d.type != 'CPU' and d.use for d in prefs.devices)
+            scene.cycles.device = 'GPU' if has_gpu else 'CPU'
+        except Exception:
+            scene.cycles.device = 'CPU'
+    else:
+        scene.cycles.device = 'CPU'
+
+
+def bake_texture(high_obj, low_obj, s, context):
+    scene = context.scene
+    _setup_render_engine(scene, s)
+
     img_name = f"{low_obj.name}_{s.bake_type}_Baked"
     if img_name in bpy.data.images:
         bpy.data.images.remove(bpy.data.images[img_name])
     img = bpy.data.images.new(img_name, width=s.resolution, height=s.resolution)
 
     if s.bake_type in {'NORMAL', 'AO', 'ROUGHNESS', 'METALLIC', 'EMIT'}:
-        img.colorspace_settings.name = 'Non-Color'  # type: ignore[assignment]
+        img.colorspace_settings.name = 'Non-Color'  # type: ignore
     else:
-        img.colorspace_settings.name = 'sRGB'  # type: ignore[assignment]
+        img.colorspace_settings.name = 'sRGB'  # type: ignore
 
-    # --- Материал-приёмник (переиспользуем существующий) ---
     mat = _get_or_create_bake_material(low_obj)
     nodes = mat.node_tree.nodes
     tex_node = nodes.new('ShaderNodeTexImage')
-    tex_node.image = img  # type: ignore[attr-defined]
+    tex_node.image = img  # type: ignore
     nodes.active = tex_node
     tex_node.select = True
 
-    # --- Выделение ---
     if s.auto_fix_selection:
         force_select(high_obj, low_obj, context)
     else:
@@ -38,104 +50,68 @@ def bake_texture(high_obj, low_obj, s, context):
         low_obj.select_set(True)
         context.view_layer.objects.active = low_obj
 
-    # =========================================================
-    # ПОДГОТОВКА К ЗАПЕКАНИЮ
-    # =========================================================
     actual_bake_type = s.bake_type
     original_materials = list(high_obj.data.materials)
-    metallic_links_to_restore = []  # Для восстановления связей Diffuse
+    metallic_links_to_restore = []
 
-    # 1. Обходной путь для METALLIC (через EMIT)
     if s.bake_type == 'METALLIC':
         actual_bake_type = 'EMIT'
         for i, orig_mat in enumerate(original_materials):
             if not orig_mat or not orig_mat.use_nodes:
                 continue
-
             temp_mat = orig_mat.copy()
             high_obj.data.materials[i] = temp_mat
-
-            t_nodes = temp_mat.node_tree.nodes
-            t_links = temp_mat.node_tree.links
-
-            principled = next((n for n in t_nodes if n.type == 'BSDF_PRINCIPLED'), None)
-            output = next((n for n in t_nodes if n.type == 'OUTPUT_MATERIAL'), None)
-
+            principled = next((n for n in temp_mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            output = next((n for n in temp_mat.node_tree.nodes if n.type == 'OUTPUT_MATERIAL'), None)
             if principled and output:
                 metallic_sock = principled.inputs.get('Metallic')
                 if metallic_sock:
-                    source_socket = None
+                    source_socket = metallic_sock.links[0].from_socket if metallic_sock.is_linked else None
                     if metallic_sock.is_linked:
-                        source_socket = metallic_sock.links[0].from_socket
-                        t_links.remove(metallic_sock.links[0])
-
-                    emission = t_nodes.new('ShaderNodeEmission')
-                    emission.location = (principled.location.x, principled.location.y - 200)
-
+                        temp_mat.node_tree.links.remove(metallic_sock.links[0])
+                    emission = temp_mat.node_tree.nodes.new('ShaderNodeEmission')
                     if source_socket:
-                        t_links.new(source_socket, emission.inputs['Color'])
+                        temp_mat.node_tree.links.new(source_socket, emission.inputs['Color'])
                     else:
                         val = metallic_sock.default_value
                         emission.inputs['Color'].default_value = (val, val, val, 1.0)
-
                     for link in list(output.inputs['Surface'].links):
-                        t_links.remove(link)
-                    t_links.new(emission.outputs['Emission'], output.inputs['Surface'])
+                        temp_mat.node_tree.links.remove(link)
+                    temp_mat.node_tree.links.new(emission.outputs['Emission'], output.inputs['Surface'])
 
-    # 2. Обходной путь для DIFFUSE (отключаем текстуру металла)
     elif s.bake_type == 'DIFFUSE':
         for orig_mat in original_materials:
             if not orig_mat or not orig_mat.use_nodes or not orig_mat.node_tree:
                 continue
-
             principled = next((n for n in orig_mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
             if principled:
                 metallic_sock = principled.inputs.get('Metallic')
                 if metallic_sock and metallic_sock.is_linked:
-                    # Запоминаем связь и старое значение
                     link = metallic_sock.links[0]
-                    from_socket = link.from_socket
-                    old_val = metallic_sock.default_value
-
-                    # Отключаем и обнуляем
+                    metallic_links_to_restore.append((orig_mat, metallic_sock, link.from_socket, metallic_sock.default_value))
                     orig_mat.node_tree.links.remove(link)
                     metallic_sock.default_value = 0.0
 
-                    metallic_links_to_restore.append((orig_mat, metallic_sock, from_socket, old_val))
-
-    # --- Параметры запекания ---
     bake_settings = scene.render.bake
     bake_settings.use_selected_to_active = True
     bake_settings.cage_extrusion = s.cage_extrusion
     bake_settings.margin = s.margin
     bake_settings.margin_type = s.margin_type
-    bake_settings.use_clear = True
+    bake_settings.use_clear = s.use_clear
     bake_settings.use_cage = False
 
-    if s.bake_type == 'DIFFUSE':
+    if s.bake_type in {'DIFFUSE', 'EMIT', 'METALLIC'}:
         bake_settings.use_pass_direct = False
         bake_settings.use_pass_indirect = False
-        bake_settings.use_pass_color = True
-    elif s.bake_type in {'EMIT', 'METALLIC'}:
-        bake_settings.use_pass_direct = False
-        bake_settings.use_pass_indirect = False
-        bake_settings.use_pass_color = False
+        bake_settings.use_pass_color = (s.bake_type == 'DIFFUSE')
 
-    print(f"[BAKE] {s.bake_type}: {high_obj.name} → {low_obj.name} @ {s.resolution}px")
-    print(f"[BAKE] cage_extrusion={s.cage_extrusion}, "
-          f"margin={s.margin}px ({s.margin_type})")
-
-    # --- ЗАПУСК ---
     result = {'CANCELLED'}
     try:
         result = bpy.ops.object.bake(
-            type=actual_bake_type,
-            use_selected_to_active=True,
-            cage_extrusion=s.cage_extrusion,
-            margin=s.margin,
+            type=actual_bake_type, use_selected_to_active=True,
+            cage_extrusion=s.cage_extrusion, margin=s.margin,
         )
     finally:
-        # ВОССТАНАВЛИВАЕМ материалы High-poly (даже если произошла ошибка)
         if s.bake_type == 'METALLIC':
             for i, orig_mat in enumerate(original_materials):
                 temp_mat = high_obj.data.materials[i]
@@ -143,7 +119,6 @@ def bake_texture(high_obj, low_obj, s, context):
                     high_obj.data.materials[i] = orig_mat
                     bpy.data.materials.remove(temp_mat)
         elif s.bake_type == 'DIFFUSE':
-            # Возвращаем текстуру Metallic и старое значение
             for orig_mat, sock, from_socket, old_val in metallic_links_to_restore:
                 if orig_mat.node_tree:
                     orig_mat.node_tree.links.new(from_socket, sock)
@@ -154,31 +129,24 @@ def bake_texture(high_obj, low_obj, s, context):
 
     diagnose_color(img, s.bake_type)
 
-    # --- Автоподключение к Principled BSDF на Low-poly ---
     if s.connect_after_bake:
         if connect_texture_to_principled(mat, tex_node, s.bake_type):
-            print(f"[BAKE] {s.bake_type}: текстура подключена к материалу")
-        else:
-            print(f"[BAKE] ⚠️ Не удалось подключить {s.bake_type} к материалу")
+            print("[BAKE] Текстура подключена к материалу")
 
-    # --- Автовыравнивание нод ---
     if getattr(s, "align_nodes_after_bake", False):
         align_material_nodes(mat)
-        print("[BAKE] Ноды материала выровнены в цепочку")
 
     return img
 
 
 def _get_or_create_bake_material(low_obj):
-    """Переиспользует материал {low_name}_BakeMat, если он уже создан."""
     mat_name = f"{low_obj.name}_BakeMat"
     mat = bpy.data.materials.get(mat_name)
     if mat is None or not mat.use_nodes:
         mat = bpy.data.materials.new(name=mat_name)
         mat.use_nodes = True
-    if mat.node_tree is None:
-        raise RuntimeError(f"Не удалось создать node tree для '{mat.name}'")
-
+    if not mat.node_tree:
+        raise RuntimeError("Ошибка Node Tree")
     if low_obj.data.materials:
         low_obj.data.materials[0] = mat
     else:
@@ -186,40 +154,31 @@ def _get_or_create_bake_material(low_obj):
     return mat
 
 
-# ============================================================
-# АВТОПОДКЛЮЧЕНИЕ: диспетчер + функции по типам
-# ============================================================
 def connect_texture_to_principled(mat, tex_node, bake_type):
-    """Подключает Image Texture к нужному входу Principled BSDF."""
     if not mat or not mat.use_nodes or mat.node_tree is None:
         return False
-
     nodes = mat.node_tree.nodes
     links = mat.node_tree.links
-
     principled = next((n for n in nodes if n.type == 'BSDF_PRINCIPLED'), None)
     output = next((n for n in nodes if n.type == 'OUTPUT_MATERIAL'), None)
-
-    tx = tex_node.location[0]
-    ty = tex_node.location[1]
+    tx, ty = tex_node.location[0], tex_node.location[1]
 
     if principled is None:
         principled = nodes.new('ShaderNodeBsdfPrincipled')
         principled.location = (tx + 300, ty)
-
     if output is None:
         output = nodes.new('ShaderNodeOutputMaterial')
         output.location = (principled.location[0] + 300, principled.location[1])
 
+    # Заменили переменную 'l' на 'lnk' для исправления E741
     surface_linked = any(
-        link.from_node == principled and link.to_node == output
-        and link.to_socket.name == 'Surface'
-        for link in links
+        lnk.from_node == principled and lnk.to_node == output and lnk.to_socket.name == 'Surface'
+        for lnk in links
     )
     if not surface_linked:
-        for link in list(links):
-            if link.to_node == output and link.to_socket.name == 'Surface':
-                links.remove(link)
+        for lnk in list(links):
+            if lnk.to_node == output and lnk.to_socket.name == 'Surface':
+                links.remove(lnk)
         links.new(principled.outputs['BSDF'], output.inputs['Surface'])
 
     if bake_type == 'DIFFUSE':
@@ -238,7 +197,6 @@ def connect_texture_to_principled(mat, tex_node, bake_type):
 
 
 def _connect_simple(links, tex_node, principled, socket_name):
-    """Image.Color → Principled.<socket_name>"""
     target = principled.inputs.get(socket_name)
     if target is None:
         return False
@@ -250,11 +208,9 @@ def _connect_simple(links, tex_node, principled, socket_name):
 
 
 def _connect_base_color(links, tex_node, principled):
-    """Image.Color → Base Color (учитывает существующий AO Mix)."""
     base_color = principled.inputs.get('Base Color')
     if base_color is None:
         return False
-
     for link in list(links):
         if link.to_socket == base_color:
             src_node = link.from_node
@@ -266,17 +222,14 @@ def _connect_base_color(links, tex_node, principled):
                 return True
             else:
                 links.remove(link)
-
     links.new(tex_node.outputs['Color'], base_color)
     return True
 
 
 def _connect_normal(links, nodes, tex_node, principled):
-    """Image.Color → Normal Map.Color → Principled.Normal"""
     normal_input = principled.inputs.get('Normal')
     if normal_input is None:
         return False
-
     normal_map = None
     for link in list(links):
         if link.to_socket == normal_input:
@@ -285,15 +238,10 @@ def _connect_normal(links, nodes, tex_node, principled):
             else:
                 links.remove(link)
             break
-
     if normal_map is None:
         normal_map = nodes.new('ShaderNodeNormalMap')
-        normal_map.location = (
-            principled.location[0] - 250,
-            principled.location[1] - 150,
-        )
+        normal_map.location = (principled.location[0] - 250, principled.location[1] - 150)
         links.new(normal_map.outputs['Normal'], normal_input)
-
     for link in list(links):
         if link.to_node == normal_map and link.to_socket.name == 'Color':
             links.remove(link)
@@ -302,46 +250,35 @@ def _connect_normal(links, nodes, tex_node, principled):
 
 
 def _connect_emission(links, tex_node, principled):
-    """Image.Color → Emission Color, Emission Strength = 1.0"""
-    emission_input = principled.inputs.get('Emission Color')
-    if emission_input is None:
-        emission_input = principled.inputs.get('Emission')
+    emission_input = principled.inputs.get('Emission Color') or principled.inputs.get('Emission')
     if emission_input is None:
         return False
-
     for link in list(links):
         if link.to_socket == emission_input:
             links.remove(link)
     links.new(tex_node.outputs['Color'], emission_input)
-
     strength = principled.inputs.get('Emission Strength')
     if strength is not None and not strength.is_linked:
         strength.default_value = 1.0
-
     return True
 
 
 def _connect_ao(links, nodes, tex_node, principled):
-    """Image.Color → Mix(Multiply).Color2 → Base Color."""
     base_color = principled.inputs.get('Base Color')
     if base_color is None:
         return False
-
     existing_mix = None
     for link in list(links):
         if link.to_socket == base_color:
-            if (link.from_node.type == 'MIX_RGB'
-                    and link.from_node.blend_type == 'MULTIPLY'):
+            if link.from_node.type == 'MIX_RGB' and link.from_node.blend_type == 'MULTIPLY':
                 existing_mix = link.from_node
             break
-
     if existing_mix is not None:
         for link in list(links):
             if link.to_node == existing_mix and link.to_socket.name == 'Color2':
                 links.remove(link)
         links.new(tex_node.outputs['Color'], existing_mix.inputs['Color2'])
         return True
-
     default_color = tuple(base_color.default_value)
     existing_source = None
     for link in list(links):
@@ -349,35 +286,22 @@ def _connect_ao(links, nodes, tex_node, principled):
             existing_source = link.from_socket
             links.remove(link)
             break
-
     mix = nodes.new('ShaderNodeMixRGB')
     mix.blend_type = 'MULTIPLY'
     mix.inputs['Fac'].default_value = 1.0
-    mix.location = (
-        principled.location[0] - 300,
-        principled.location[1] + 100,
-    )
-
+    mix.location = (principled.location[0] - 300, principled.location[1] + 100)
     if existing_source is not None:
         links.new(existing_source, mix.inputs['Color1'])
     else:
-        mix.inputs['Color1'].default_value = (
-            default_color[0], default_color[1], default_color[2], 1.0,
-        )
-
+        mix.inputs['Color1'].default_value = (default_color[0], default_color[1], default_color[2], 1.0)
     links.new(tex_node.outputs['Color'], mix.inputs['Color2'])
     links.new(mix.outputs['Color'], base_color)
     return True
 
 
-# ============================================================
-# АВТОВЫРАВНИВАНИЕ НОД
-# ============================================================
 def align_material_nodes(mat):
-    """Выстраивает ноды в цепочку слева направо."""
     if not mat or not mat.use_nodes or not mat.node_tree:
         return
-
     nodes = mat.node_tree.nodes
     cache = {}
 
@@ -387,13 +311,11 @@ def align_material_nodes(mat):
         if n in visiting:
             return 0
         visiting.add(n)
-
         max_in_depth = -1
         for inp in n.inputs:
             for link in inp.links:
                 d = get_depth(link.from_node, visiting)
                 max_in_depth = max(max_in_depth, d)
-
         visiting.remove(n)
         depth = (max_in_depth + 1) if max_in_depth >= 0 else 0
         cache[n] = depth
@@ -415,23 +337,16 @@ def align_material_nodes(mat):
             n.location = (d * 300, -i * 200)
 
 
-# ============================================================
-# ДИАГНОСТИКА И СОХРАНЕНИЕ
-# ============================================================
 def diagnose_color(img, bake_type):
-    """Быстрая проверка: чёрная или «нормально-голубая» текстура."""
     try:
-        px = list(img.pixels[:4096])
-        if not px:
+        pixels = list(img.pixels[:4096])
+        if not pixels:
             return
-        r, g, b = px[0], px[1], px[2]
-        if max(px) < 0.001:
+        if max(pixels) < 0.001:
             print("[BAKE] ⚠️ Текстура полностью чёрная.")
             return
-        if (bake_type == 'DIFFUSE'
-                and abs(r - 0.5) < 0.02
-                and abs(g - 0.5) < 0.02
-                and b > 0.95):
+        r, g, b = pixels[0], pixels[1], pixels[2]
+        if bake_type == 'DIFFUSE' and abs(r - 0.5) < 0.02 and abs(g - 0.5) < 0.02 and b > 0.95:
             print("[BAKE] ⚠️ Результат похож на карту нормалей (голубой).")
     except Exception:
         pass
@@ -439,10 +354,7 @@ def diagnose_color(img, bake_type):
 
 def save_baked_image(img, low_name, bake_type):
     blend = bpy.data.filepath
-    if blend:
-        folder = blend.rsplit('/', 1)[0].rsplit('\\', 1)[0]
-    else:
-        folder = bpy.utils.user_resource('DOCUMENTS', create=True)
+    folder = blend.rsplit('/', 1)[0].rsplit('\\', 1)[0] if blend else bpy.utils.user_resource('DOCUMENTS', create=True)
     path = f"{folder}/{low_name}_{bake_type}_Baked.png"
     img.filepath_raw = path
     img.file_format = 'PNG'
