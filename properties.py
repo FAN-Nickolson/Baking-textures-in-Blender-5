@@ -6,6 +6,31 @@ from bpy.props import (
 )
 
 
+def update_lang(self, context):
+    """Обновляет подсказки (bl_description) у операторов при смене языка."""
+    from .utils import t
+    from . import operators
+
+    lang = self.language
+
+    # Подсказки для кнопок (операторов)
+    operators.BAKOT_OT_fill_from_selection.bl_description = t(
+        lang,
+        "Активный = Low, второй выделенный = High",
+        "Active = Low, second selected = High"
+    )
+    operators.BAKOT_OT_unwrap_low_only.bl_description = t(
+        lang,
+        "Создаёт UV-развёртку для low-poly без запекания",
+        "Creates UV unwrap for low-poly without baking"
+    )
+    operators.BAKOT_OT_bake_high_to_low.bl_description = t(
+        lang,
+        "Запекает выбранную карту с high-poly объекта на low-poly",
+        "Bakes the selected map from high-poly to low-poly"
+    )
+
+
 class BAKOT_PG_settings(bpy.types.PropertyGroup):
     language: EnumProperty(
         name="Language / Язык",
@@ -14,6 +39,7 @@ class BAKOT_PG_settings(bpy.types.PropertyGroup):
             ('EN', "English", "English language"),
         ],
         default='RU',
+        update=update_lang,
     )
 
     high_name: StringProperty(name="High-poly объект")

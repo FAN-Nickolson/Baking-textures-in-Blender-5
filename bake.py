@@ -39,14 +39,15 @@ def bake_texture(high_obj, low_obj, s, context):
         context.view_layer.objects.active = low_obj
 
     # =========================================================
-    # ПОДГОТОВКА К ЗАПЕКАНИЮ (Обходной путь для METALLIC)
+    # ПОДГОТОВКА К ЗАПЕКАНИЮ
     # =========================================================
     actual_bake_type = s.bake_type
     original_materials = list(high_obj.data.materials)
+    metallic_links_to_restore = []  # Для восстановления связей Diffuse
 
+    # 1. Обходной путь для METALLIC (через EMIT)
     if s.bake_type == 'METALLIC':
         actual_bake_type = 'EMIT'
-        # Временно подменяем материалы на копии с подключенным Emission
         for i, orig_mat in enumerate(original_materials):
             if not orig_mat or not orig_mat.use_nodes:
                 continue
@@ -80,6 +81,27 @@ def bake_texture(high_obj, low_obj, s, context):
                     for link in list(output.inputs['Surface'].links):
                         t_links.remove(link)
                     t_links.new(emission.outputs['Emission'], output.inputs['Surface'])
+
+    # 2. Обходной путь для DIFFUSE (отключаем текстуру металла)
+    elif s.bake_type == 'DIFFUSE':
+        for orig_mat in original_materials:
+            if not orig_mat or not orig_mat.use_nodes or not orig_mat.node_tree:
+                continue
+
+            principled = next((n for n in orig_mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if principled:
+                metallic_sock = principled.inputs.get('Metallic')
+                if metallic_sock and metallic_sock.is_linked:
+                    # Запоминаем связь и старое значение
+                    link = metallic_sock.links[0]
+                    from_socket = link.from_socket
+                    old_val = metallic_sock.default_value
+
+                    # Отключаем и обнуляем
+                    orig_mat.node_tree.links.remove(link)
+                    metallic_sock.default_value = 0.0
+
+                    metallic_links_to_restore.append((orig_mat, metallic_sock, from_socket, old_val))
 
     # --- Параметры запекания ---
     bake_settings = scene.render.bake
@@ -120,6 +142,12 @@ def bake_texture(high_obj, low_obj, s, context):
                 if temp_mat and temp_mat != orig_mat:
                     high_obj.data.materials[i] = orig_mat
                     bpy.data.materials.remove(temp_mat)
+        elif s.bake_type == 'DIFFUSE':
+            # Возвращаем текстуру Metallic и старое значение
+            for orig_mat, sock, from_socket, old_val in metallic_links_to_restore:
+                if orig_mat.node_tree:
+                    orig_mat.node_tree.links.new(from_socket, sock)
+                    sock.default_value = old_val
 
     if result != {'FINISHED'}:
         raise RuntimeError(f"bake вернул {result}")
