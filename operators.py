@@ -97,6 +97,10 @@ class BAKOT_OT_bake_high_to_low(bpy.types.Operator):
                 print(f"[PREFLIGHT] {w}")
             print("================================\n")
 
+        # Вывод подсказки в консоль, что Metallic будет запечен через Emit
+        if s.bake_type == 'METALLIC':
+            print("[BAKE] METALLIC запекается через EMIT (автоматическая подмена нод)")
+
         try:
             img = bake_texture(high, low, s, context)
         except Exception as e:

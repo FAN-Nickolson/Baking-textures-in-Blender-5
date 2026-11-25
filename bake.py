@@ -16,7 +16,6 @@ def bake_texture(high_obj, low_obj, s, context):
         bpy.data.images.remove(bpy.data.images[img_name])
     img = bpy.data.images.new(img_name, width=s.resolution, height=s.resolution)
 
-    # EMIT теперь используется для карт высот, поэтому тоже Non-Color
     if s.bake_type in {'NORMAL', 'AO', 'ROUGHNESS', 'METALLIC', 'EMIT'}:
         img.colorspace_settings.name = 'Non-Color'  # type: ignore[assignment]
     else:
@@ -39,7 +38,50 @@ def bake_texture(high_obj, low_obj, s, context):
         low_obj.select_set(True)
         context.view_layer.objects.active = low_obj
 
-    # --- Параметры ---
+    # =========================================================
+    # ПОДГОТОВКА К ЗАПЕКАНИЮ (Обходной путь для METALLIC)
+    # =========================================================
+    actual_bake_type = s.bake_type
+    original_materials = list(high_obj.data.materials)
+
+    if s.bake_type == 'METALLIC':
+        actual_bake_type = 'EMIT'
+        # Временно подменяем материалы на копии с подключенным Emission
+        for i, orig_mat in enumerate(original_materials):
+            if not orig_mat or not orig_mat.use_nodes:
+                continue
+
+            temp_mat = orig_mat.copy()
+            high_obj.data.materials[i] = temp_mat
+
+            t_nodes = temp_mat.node_tree.nodes
+            t_links = temp_mat.node_tree.links
+
+            principled = next((n for n in t_nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            output = next((n for n in t_nodes if n.type == 'OUTPUT_MATERIAL'), None)
+
+            if principled and output:
+                metallic_sock = principled.inputs.get('Metallic')
+                if metallic_sock:
+                    source_socket = None
+                    if metallic_sock.is_linked:
+                        source_socket = metallic_sock.links[0].from_socket
+                        t_links.remove(metallic_sock.links[0])
+
+                    emission = t_nodes.new('ShaderNodeEmission')
+                    emission.location = (principled.location.x, principled.location.y - 200)
+
+                    if source_socket:
+                        t_links.new(source_socket, emission.inputs['Color'])
+                    else:
+                        val = metallic_sock.default_value
+                        emission.inputs['Color'].default_value = (val, val, val, 1.0)
+
+                    for link in list(output.inputs['Surface'].links):
+                        t_links.remove(link)
+                    t_links.new(emission.outputs['Emission'], output.inputs['Surface'])
+
+    # --- Параметры запекания ---
     bake_settings = scene.render.bake
     bake_settings.use_selected_to_active = True
     bake_settings.cage_extrusion = s.cage_extrusion
@@ -52,7 +94,7 @@ def bake_texture(high_obj, low_obj, s, context):
         bake_settings.use_pass_direct = False
         bake_settings.use_pass_indirect = False
         bake_settings.use_pass_color = True
-    elif s.bake_type == 'EMIT':
+    elif s.bake_type in {'EMIT', 'METALLIC'}:
         bake_settings.use_pass_direct = False
         bake_settings.use_pass_indirect = False
         bake_settings.use_pass_color = False
@@ -61,18 +103,30 @@ def bake_texture(high_obj, low_obj, s, context):
     print(f"[BAKE] cage_extrusion={s.cage_extrusion}, "
           f"margin={s.margin}px ({s.margin_type})")
 
-    result = bpy.ops.object.bake(
-        type=s.bake_type,
-        use_selected_to_active=True,
-        cage_extrusion=s.cage_extrusion,
-        margin=s.margin,
-    )
+    # --- ЗАПУСК ---
+    result = {'CANCELLED'}
+    try:
+        result = bpy.ops.object.bake(
+            type=actual_bake_type,
+            use_selected_to_active=True,
+            cage_extrusion=s.cage_extrusion,
+            margin=s.margin,
+        )
+    finally:
+        # ВОССТАНАВЛИВАЕМ материалы High-poly (даже если произошла ошибка)
+        if s.bake_type == 'METALLIC':
+            for i, orig_mat in enumerate(original_materials):
+                temp_mat = high_obj.data.materials[i]
+                if temp_mat and temp_mat != orig_mat:
+                    high_obj.data.materials[i] = orig_mat
+                    bpy.data.materials.remove(temp_mat)
+
     if result != {'FINISHED'}:
         raise RuntimeError(f"bake вернул {result}")
 
     diagnose_color(img, s.bake_type)
 
-    # --- Автоподключение к Principled BSDF ---
+    # --- Автоподключение к Principled BSDF на Low-poly ---
     if s.connect_after_bake:
         if connect_texture_to_principled(mat, tex_node, s.bake_type):
             print(f"[BAKE] {s.bake_type}: текстура подключена к материалу")
@@ -129,7 +183,6 @@ def connect_texture_to_principled(mat, tex_node, bake_type):
         output = nodes.new('ShaderNodeOutputMaterial')
         output.location = (principled.location[0] + 300, principled.location[1])
 
-    # Principled → Output
     surface_linked = any(
         link.from_node == principled and link.to_node == output
         and link.to_socket.name == 'Surface'
@@ -177,7 +230,6 @@ def _connect_base_color(links, tex_node, principled):
     for link in list(links):
         if link.to_socket == base_color:
             src_node = link.from_node
-            # Если Base Color питается от AO-Mix — обновляем его Color1
             if src_node.type == 'MIX_RGB' and src_node.blend_type == 'MULTIPLY':
                 for l2 in list(links):
                     if l2.to_node == src_node and l2.to_socket.name == 'Color1':
@@ -247,7 +299,6 @@ def _connect_ao(links, nodes, tex_node, principled):
     if base_color is None:
         return False
 
-    # Уже есть AO Mix — обновляем Color2
     existing_mix = None
     for link in list(links):
         if link.to_socket == base_color:
@@ -263,7 +314,6 @@ def _connect_ao(links, nodes, tex_node, principled):
         links.new(tex_node.outputs['Color'], existing_mix.inputs['Color2'])
         return True
 
-    # Создаём новый Mix
     default_color = tuple(base_color.default_value)
     existing_source = None
     for link in list(links):
@@ -296,7 +346,7 @@ def _connect_ao(links, nodes, tex_node, principled):
 # АВТОВЫРАВНИВАНИЕ НОД
 # ============================================================
 def align_material_nodes(mat):
-    """Выстраивает ноды в цепочку слева направо: Image -> ... -> Principled -> Output."""
+    """Выстраивает ноды в цепочку слева направо."""
     if not mat or not mat.use_nodes or not mat.node_tree:
         return
 
@@ -307,7 +357,7 @@ def align_material_nodes(mat):
         if n in cache:
             return cache[n]
         if n in visiting:
-            return 0  # Защита от циклов
+            return 0
         visiting.add(n)
 
         max_in_depth = -1
@@ -317,7 +367,6 @@ def align_material_nodes(mat):
                 max_in_depth = max(max_in_depth, d)
 
         visiting.remove(n)
-        # Глубина = максимальная глубина входящих + 1
         depth = (max_in_depth + 1) if max_in_depth >= 0 else 0
         cache[n] = depth
         return depth
@@ -325,7 +374,6 @@ def align_material_nodes(mat):
     for n in nodes:
         get_depth(n, set())
 
-    # Группируем по глубине (это будут столбцы)
     columns = {}
     for n in nodes:
         if n.type == 'FRAME':
@@ -333,7 +381,6 @@ def align_material_nodes(mat):
         d = cache.get(n, 0)
         columns.setdefault(d, []).append(n)
 
-    # Расставляем: X зависит от глубины (300px), Y — порядковый номер в столбце (200px)
     for d, col_nodes in columns.items():
         col_nodes.sort(key=lambda n: (n.name, n.type))
         for i, n in enumerate(col_nodes):
