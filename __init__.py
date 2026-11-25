@@ -3,7 +3,7 @@
 bl_info = {
     "name": "Bake Helper: High → Low",
     "author": "Custom",
-    "version": (1, 2, 0),
+    "version": (1, 3, 0),
     "blender": (5, 0, 0),
     "location": "View3D > Sidebar > Bake | Object menu",
     "description": "Запекание текстур с high-poly на low-poly + авто-UV",
