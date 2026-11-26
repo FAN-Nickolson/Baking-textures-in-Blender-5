@@ -2,7 +2,7 @@
 
 [![Blender](https://img.shields.io/badge/Blender-5.0%2B-orange.svg?style=flat-square&logo=blender)](https://www.blender.org/)
 [![Version](https://img.shields.io/badge/version-1.5.0-blue.svg?style=flat-square)](https://github.com/FAN-Nickolson/Baking-textures-in-Blender-5/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
+[![License](https://www.gnu.org/licenses/gpl-3.0.txt)](LICENSE)
 
 **Bake Helper** is a robust, production-ready add-on for Blender 5 that completely automates the texture baking workflow from High-poly to Low-poly meshes. Say goodbye to manual node wiring, black texture frustrations, and hidden object errors.
 
@@ -30,9 +30,10 @@
 
 ## 📦 Installation
 
-1. Download the latest **`bake_helper.zip`** from the [Releases](https://github.com/FAN-Nickolson/Baking-textures-in-Blender-5/releases/latest) page.
+1. Download the latest ZIP from the [Releases](https://github.com/FAN-Nickolson/Baking-textures-in-Blender-5/releases/latest) page (the file is named like `bake_helper-<version>.zip`, e.g. `bake_helper-1.5.0.zip`).
+
 2. Open Blender 5.0 or newer.
-3. Go to `Edit → Preferences → Add-ons`.
+3. Go to `Edit → Preferences → Get Extensions → Install from Disk`.
 4. Click the arrow in the top-right corner and select **Install from Disk...**.
 5. Select the downloaded ZIP file and enable the checkbox next to **Bake Helper: High → Low**.
 
@@ -72,4 +73,4 @@ Found a bug or have a feature request? Please open an [Issue](https://github.com
 
 ## 📄 License
 
-This project is distributed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is distributed under the GPL-3.0-or-later License. See the [LICENSE](LICENSE) file for details.

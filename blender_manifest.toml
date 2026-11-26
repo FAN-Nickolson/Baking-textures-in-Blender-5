@@ -1,0 +1,12 @@
+schema_version = "1.0.0"
+
+id = "bake_helper"
+version = "1.5.0"
+name = "Bake Helper: High -> Low"
+tagline = "Automated high-to-low poly texture baking"
+maintainer = "Andrew Frolov <andrew.n.frolov@gmail.com>"
+type = "add-on"
+website = "https://github.com/FAN-Nickolson/Baking-textures-in-Blender-5"
+tags = ["Bake", "Material", "UV", "3D View"]
+blender_version_min = "5.0.0"
+license = ["SPDX:GPL-3.0-or-later"]
